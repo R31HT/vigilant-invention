@@ -42,6 +42,8 @@ local function cleanup()
 end
 getgenv().ENCOUNTERS_HUB = { cleanup = cleanup }
 if STATE and STATE.onCleanup then
+    STATE.onCleanup(cleanup)
+end
 
 local CONFIG_FILE = "encounters_hub_config.json"
 
