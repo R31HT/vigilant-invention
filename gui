@@ -357,12 +357,9 @@ MainTab:Slider({
 })
 
 
-local SELF_NAME = "encounters_hub.luau"
+local SELF_URL = "https://raw.githubusercontent.com/R31HT/vigilant-invention/refs/heads/main/gui"
 if queue_on_teleport then
-    local ok, src = pcall(readfile, SELF_NAME)
-    if ok and src and src ~= "" then
-        pcall(queue_on_teleport, src)
-    end
+    pcall(queue_on_teleport, ('loadstring(game:HttpGet(%q))()'):format(SELF_URL))
 end
 
 onCleanup(function()
