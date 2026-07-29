@@ -1,0 +1,372 @@
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+local CollectionService = game:GetService("CollectionService")
+local HttpService = game:GetService("HttpService")
+
+local LocalPlayer = Players.LocalPlayer
+local PlayerScripts = LocalPlayer:WaitForChild("PlayerScripts")
+
+local Variables = require(PlayerScripts:WaitForChild("Variables"))
+local Debounce = require(PlayerScripts:WaitForChild("Debounce"))
+local Util = ReplicatedStorage:WaitForChild("Util")
+local GetEnemies = require(Util:WaitForChild("GetEnemies"))
+local IsAlive = require(Util:WaitForChild("IsAlive"))
+local BufferPos = require(Util:WaitForChild("BufferPos"))
+local ArashMineRemote = ReplicatedStorage:WaitForChild("RF"):WaitForChild("Champions"):WaitForChild("Arash"):WaitForChild("ArashMine")
+
+if getgenv().ENCOUNTERS_HUB and getgenv().ENCOUNTERS_HUB.cleanup then
+    pcall(getgenv().ENCOUNTERS_HUB.cleanup)
+end
+
+local cleanups = {}
+local conns = {}
+local function onCleanup(fn)
+    table.insert(cleanups, fn)
+end
+local function connect(signal, fn)
+    local c = signal:Connect(fn)
+    table.insert(conns, c)
+    return c
+end
+local function cleanup()
+    for _, c in ipairs(conns) do
+        pcall(function() c:Disconnect() end)
+    end
+    for _, fn in ipairs(cleanups) do
+        pcall(fn)
+    end
+    conns = {}
+    cleanups = {}
+end
+getgenv().ENCOUNTERS_HUB = { cleanup = cleanup }
+if STATE and STATE.onCleanup then
+
+local CONFIG_FILE = "encounters_hub_config.json"
+
+local flags = {
+    inf_energy = false,
+    inf_ult = false,
+    no_cooldown = false,
+    godmode = false,
+    mine_target = false,
+    mine_target_rate = 0.3,
+}
+
+local function load_config()
+    if not isfile(CONFIG_FILE) then
+        return {}
+    end
+    local ok, raw = pcall(readfile, CONFIG_FILE)
+    if not ok or not raw or raw == "" then
+        return {}
+    end
+    local ok2, data = pcall(function() return HttpService:JSONDecode(raw) end)
+    if not ok2 or typeof(data) ~= "table" then
+        return {}
+    end
+    return data
+end
+
+local function save_config()
+    local snap = {
+        inf_energy = flags.inf_energy,
+        inf_ult = flags.inf_ult,
+        no_cooldown = flags.no_cooldown,
+        godmode = flags.godmode,
+        mine_target = flags.mine_target,
+        mine_target_rate = flags.mine_target_rate,
+    }
+    pcall(function()
+        writefile(CONFIG_FILE, HttpService:JSONEncode(snap))
+    end)
+end
+
+
+
+do
+    local saved = load_config()
+    for k in pairs(flags) do
+        if saved[k] ~= nil and typeof(saved[k]) == typeof(flags[k]) then
+            flags[k] = saved[k]
+        end
+    end
+end
+
+
+local original_cdr = Workspace:GetAttribute("cdr")
+
+
+if flags.no_cooldown then
+    pcall(function()
+        Workspace:SetAttribute("cdr", 1)
+    end)
+end
+
+if flags.godmode then
+    Debounce.antikb = true
+end
+
+
+local GetEnergy = require(PlayerScripts:WaitForChild("Client"):WaitForChild("GetEnergy"))
+
+local function real_energy()
+    local char = LocalPlayer.Character
+    if char then
+        local e = char:FindFirstChild("Energy")
+        if e then
+            return e.Value
+        end
+    end
+    return 0
+end
+
+hookfunction(GetEnergy, function()
+    if flags.inf_energy then
+        return 100
+    end
+    return real_energy()
+end)
+onCleanup(function()
+    pcall(function()
+        hookfunction(GetEnergy, real_energy)
+    end)
+end)
+
+connect(RunService.Heartbeat, function()
+    local char = LocalPlayer.Character
+    if not char then
+        return
+    end
+    if flags.inf_energy then
+        Variables.energy = 100
+    end
+    if flags.inf_ult then
+        Variables.ultimate = 100
+        local ult = char:FindFirstChild("Ultimate")
+        if ult then
+            ult.Value = 100
+        end
+    end
+    if flags.no_cooldown then
+        Workspace:SetAttribute("cdr", 1)
+    end
+    if flags.godmode then
+        Debounce.antikb = true
+    end
+end)
+onCleanup(function()
+    pcall(function()
+        Workspace:SetAttribute("cdr", original_cdr)
+    end)
+    pcall(function()
+        Debounce.antikb = nil
+    end)
+end)
+
+
+local MY_UID = tostring(LocalPlayer.UserId)
+
+local function count_own_mines()
+    local n = 0
+    for _, j in ipairs(CollectionService:GetTagged("Unit")) do
+        if string.match(j.Name, "ArashMine") and string.split(j.Name, "_")[1] == MY_UID then
+            n = n + 1
+        end
+    end
+    return n
+end
+
+local function get_target()
+    local t = Variables.aimTarget
+    if t and IsAlive(t) then
+        return t
+    end
+    local char = LocalPlayer.Character
+    if not char then
+        return nil
+    end
+    local enemies = GetEnemies(char, true)
+    if not enemies or #enemies == 0 then
+        return nil
+    end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then
+        return enemies[1]
+    end
+    local best, best_d = nil, math.huge
+    for _, e in ipairs(enemies) do
+        local ehrp = e:FindFirstChild("HumanoidRootPart")
+        if ehrp then
+            local d = (ehrp.Position - hrp.Position).Magnitude
+            if d < best_d then
+                best_d = d
+                best = e
+            end
+        end
+    end
+    return best or enemies[1]
+end
+
+
+local function is_grounded(target)
+    local hum = target:FindFirstChildOfClass("Humanoid")
+    if not hum then
+        return false
+    end
+    return hum.FloorMaterial ~= Enum.Material.Air
+end
+
+local function place_mine_at(target)
+    if not is_grounded(target) then
+        return
+    end
+    local thrp = target:FindFirstChild("HumanoidRootPart")
+    if not thrp then
+        return
+    end
+
+    local params = RaycastParams.new()
+    local filter = {}
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p.Character then
+            table.insert(filter, p.Character)
+        end
+    end
+    for _, u in ipairs(CollectionService:GetTagged("Unit")) do
+        table.insert(filter, u)
+    end
+    local temp = Workspace:FindFirstChild("Temp")
+    if temp then
+        table.insert(filter, temp)
+    end
+    params.FilterDescendantsInstances = filter
+    local r = Workspace:Raycast(thrp.Position + Vector3.new(0, 3, 0), Vector3.new(0, -10, 0), params)
+    if not r then
+        return
+    end
+    local pos = r.Position + Vector3.new(0, 0.5, 0)
+    pcall(function()
+        ArashMineRemote:InvokeServer(BufferPos(pos))
+    end)
+end
+
+local mine_timer = 0
+connect(RunService.Heartbeat, function(dt)
+    if not flags.mine_target then
+        return
+    end
+    mine_timer = mine_timer + dt
+    if mine_timer < flags.mine_target_rate then
+        return
+    end
+    mine_timer = 0
+    if count_own_mines() >= 10 then
+        return
+    end
+    local target = get_target()
+    if target then
+        place_mine_at(target)
+    end
+end)
+
+local WindUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua"))()
+
+local Window = WindUI:CreateWindow({
+    Title = "Encounters Hub",
+    Folder = "encounters_hub",
+    Icon = "solar:bolt-bold",
+})
+
+local MainTab = Window:Tab({
+    Title = "Main",
+    Icon = "solar:bolt-bold",
+})
+
+MainTab:Toggle({
+    Title = "Infinite Energy",
+    Desc = "Keep energy maxed for abilities, dash, jump, shield.",
+    Value = flags.inf_energy,
+    Callback = function(state)
+        flags.inf_energy = state
+        save_config()
+    end,
+})
+
+MainTab:Toggle({
+    Title = "Infinite Ult",
+    Desc = "Keep ultimate meter full so ult is always ready.",
+    Value = flags.inf_ult,
+    Callback = function(state)
+        flags.inf_ult = state
+        save_config()
+    end,
+})
+
+MainTab:Toggle({
+    Title = "No Cooldown",
+    Desc = "Zero every ability cooldown via the game's cdr stat. Reversible.",
+    Value = flags.no_cooldown,
+    Callback = function(state)
+        flags.no_cooldown = state
+        if not state then
+            pcall(function()
+                Workspace:SetAttribute("cdr", original_cdr)
+            end)
+        end
+        save_config()
+    end,
+})
+
+MainTab:Toggle({
+    Title = "Godmode",
+    Desc = "Never get launched by attacks (anti-knockback). The damage percent still ticks up on the server -- that's unavoidable and cosmetic -- but with knockback blocked you can't be sent off the blast zone, so attacks can't kill you. Uses the game's own Debounce.antikb flag.",
+    Value = flags.godmode,
+    Callback = function(state)
+        flags.godmode = state
+        if not state then
+            pcall(function()
+                Debounce.antikb = nil
+            end)
+        end
+        save_config()
+    end,
+})
+
+MainTab:Toggle({
+    Title = "Mine Target",
+    Desc = "Scatter mines ahead of your locked-on / nearest enemy so they keep walking into blasts. Arash only. Use with Infinite Energy. (Mines can't be force-detonated -- the server blows them up on proximity, so this leads the target to maximize hits.)",
+    Value = flags.mine_target,
+    Callback = function(state)
+        flags.mine_target = state
+        save_config()
+    end,
+})
+
+
+local mine_delay_default = math.clamp(flags.mine_target_rate / 0.05, 1, 40)
+MainTab:Slider({
+    Title = "Mine Target Delay",
+    Desc = "Seconds between mine placements on the target (lower = faster).",
+    Value = { Min = 1, Max = 40, Default = math.floor(mine_delay_default) },
+    Callback = function(value)
+        flags.mine_target_rate = value * 0.05
+        save_config()
+    end,
+})
+
+
+local SELF_NAME = "encounters_hub.luau"
+if queue_on_teleport then
+    local ok, src = pcall(readfile, SELF_NAME)
+    if ok and src and src ~= "" then
+        pcall(queue_on_teleport, src)
+    end
+end
+
+onCleanup(function()
+    pcall(function()
+        Window:Destroy()
+    end)
+end)
