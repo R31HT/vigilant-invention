@@ -14,6 +14,10 @@ local Util = ReplicatedStorage:WaitForChild("Util")
 local GetEnemies = require(Util:WaitForChild("GetEnemies"))
 local IsAlive = require(Util:WaitForChild("IsAlive"))
 local BufferPos = require(Util:WaitForChild("BufferPos"))
+local CanAttack = require(Util:WaitForChild("CanAttack"))
+
+local CallServer = require(PlayerScripts:WaitForChild("Client"):WaitForChild("CallServer"))
+
 local ArashMineRemote = ReplicatedStorage:WaitForChild("RF"):WaitForChild("Champions"):WaitForChild("Arash"):WaitForChild("ArashMine")
 
 if getgenv().ENCOUNTERS_HUB and getgenv().ENCOUNTERS_HUB.cleanup then
@@ -41,6 +45,7 @@ local function cleanup()
     cleanups = {}
 end
 getgenv().ENCOUNTERS_HUB = { cleanup = cleanup }
+
 if STATE and STATE.onCleanup then
     STATE.onCleanup(cleanup)
 end
@@ -53,7 +58,11 @@ local flags = {
     no_cooldown = false,
     godmode = false,
     mine_target = false,
+
     mine_target_rate = 0.3,
+    kill = false,
+
+    kill_rate = 0.2,
 }
 
 local function load_config()
@@ -79,13 +88,13 @@ local function save_config()
         godmode = flags.godmode,
         mine_target = flags.mine_target,
         mine_target_rate = flags.mine_target_rate,
+        kill = flags.kill,
+        kill_rate = flags.kill_rate,
     }
     pcall(function()
         writefile(CONFIG_FILE, HttpService:JSONEncode(snap))
     end)
 end
-
-
 
 do
     local saved = load_config()
@@ -96,9 +105,7 @@ do
     end
 end
 
-
 local original_cdr = Workspace:GetAttribute("cdr")
-
 
 if flags.no_cooldown then
     pcall(function()
@@ -109,7 +116,6 @@ end
 if flags.godmode then
     Debounce.antikb = true
 end
-
 
 local GetEnergy = require(PlayerScripts:WaitForChild("Client"):WaitForChild("GetEnergy"))
 
@@ -152,6 +158,7 @@ connect(RunService.Heartbeat, function()
         end
     end
     if flags.no_cooldown then
+
         Workspace:SetAttribute("cdr", 1)
     end
     if flags.godmode then
@@ -162,11 +169,11 @@ onCleanup(function()
     pcall(function()
         Workspace:SetAttribute("cdr", original_cdr)
     end)
+
     pcall(function()
         Debounce.antikb = nil
     end)
 end)
-
 
 local MY_UID = tostring(LocalPlayer.UserId)
 
@@ -211,12 +218,12 @@ local function get_target()
     return best or enemies[1]
 end
 
-
 local function is_grounded(target)
     local hum = target:FindFirstChildOfClass("Humanoid")
     if not hum then
         return false
     end
+
     return hum.FloorMaterial ~= Enum.Material.Air
 end
 
@@ -270,6 +277,52 @@ connect(RunService.Heartbeat, function(dt)
     local target = get_target()
     if target then
         place_mine_at(target)
+    end
+end)
+
+local function get_ult_remote()
+    local c = LocalPlayer.Character
+    if not c then
+        return nil
+    end
+    local re = ReplicatedStorage:FindFirstChild("RE")
+    if not re then
+        return nil
+    end
+    local champs = re:FindFirstChild("Champions")
+    if not champs then
+        return nil
+    end
+    local f = champs:FindFirstChild(c.Name)
+    if not f then
+        return nil
+    end
+    return f:FindFirstChild("Ultimate")
+end
+
+local kill_timer = 0
+connect(RunService.Heartbeat, function(dt)
+    if not flags.kill then
+        return
+    end
+    local c = LocalPlayer.Character
+    if not c or not IsAlive(c) or not CanAttack(c) then
+        return
+    end
+    local target = get_target()
+    if not target or not IsAlive(target) then
+        return
+    end
+    kill_timer = kill_timer + dt
+    if kill_timer < flags.kill_rate then
+        return
+    end
+    kill_timer = 0
+    local ult = get_ult_remote()
+    if ult then
+        pcall(function()
+            CallServer(ult, Workspace:GetServerTimeNow())
+        end)
     end
 end)
 
@@ -346,7 +399,6 @@ MainTab:Toggle({
     end,
 })
 
-
 local mine_delay_default = math.clamp(flags.mine_target_rate / 0.05, 1, 40)
 MainTab:Slider({
     Title = "Mine Target Delay",
@@ -358,6 +410,26 @@ MainTab:Slider({
     end,
 })
 
+MainTab:Toggle({
+    Title = "Kill (Ult Spam)",
+    Desc = "Spam your champion's ultimate at the locked-on / nearest enemy so the ult keeps hitting them. Champion-specific (uses your live champion's ult remote, re-resolved each cast). Most ults are self-centered AoE (e.g. Kusanagi's slash), so stay near the target. Use with Infinite Ult + No Cooldown.",
+    Value = flags.kill,
+    Callback = function(state)
+        flags.kill = state
+        save_config()
+    end,
+})
+
+local kill_delay_default = math.clamp(flags.kill_rate / 0.05, 1, 40)
+MainTab:Slider({
+    Title = "Kill Delay",
+    Desc = "Seconds between ultimate casts on the target (lower = faster).",
+    Value = { Min = 1, Max = 40, Default = math.floor(kill_delay_default) },
+    Callback = function(value)
+        flags.kill_rate = value * 0.05
+        save_config()
+    end,
+})
 
 local SELF_URL = "https://raw.githubusercontent.com/R31HT/vigilant-invention/refs/heads/main/gui"
 if queue_on_teleport then
