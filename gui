@@ -63,6 +63,9 @@ local flags = {
     kill = false,
 
     kill_rate = 0.2,
+    skill4_everyone = false,
+
+    skill4_rate = 0.2,
 }
 
 local function load_config()
@@ -90,6 +93,8 @@ local function save_config()
         mine_target_rate = flags.mine_target_rate,
         kill = flags.kill,
         kill_rate = flags.kill_rate,
+        skill4_everyone = flags.skill4_everyone,
+        skill4_rate = flags.skill4_rate,
     }
     pcall(function()
         writefile(CONFIG_FILE, HttpService:JSONEncode(snap))
@@ -326,6 +331,78 @@ connect(RunService.Heartbeat, function(dt)
     end
 end)
 
+local function get_skill4_hit_remote()
+    local c = LocalPlayer.Character
+    if not c then
+        return nil
+    end
+    local re = ReplicatedStorage:FindFirstChild("RE")
+    if not re then
+        return nil
+    end
+    local champs = re:FindFirstChild("Champions")
+    if not champs then
+        return nil
+    end
+    local f = champs:FindFirstChild(c.Name)
+    if not f then
+        return nil
+    end
+    return f:FindFirstChild("Skill4Hit")
+end
+
+local function prime_skill4_hit()
+    local remote = get_skill4_hit_remote()
+    if not remote then
+        return
+    end
+    pcall(function()
+        CallServer(remote, CFrame.new(), 0, {})
+    end)
+end
+
+local function hit_everyone_with_skill4()
+    local c = LocalPlayer.Character
+    if not c or not IsAlive(c) then
+        return
+    end
+    local remote = get_skill4_hit_remote()
+    if not remote then
+        return
+    end
+    local enemies = GetEnemies(c, true)
+    if not enemies then
+        return
+    end
+    for _, enemy in ipairs(enemies) do
+        if enemy ~= c and IsAlive(enemy) then
+            local ehrp = enemy:FindFirstChild("HumanoidRootPart")
+            if ehrp then
+                pcall(function()
+                    CallServer(remote, CFrame.new(ehrp.Position), Workspace:GetServerTimeNow(), { enemy })
+                end)
+            end
+        end
+    end
+end
+
+local skill4_timer = 0
+connect(RunService.Heartbeat, function(dt)
+    if not flags.skill4_everyone then
+        return
+    end
+    local c = LocalPlayer.Character
+    if not c or not IsAlive(c) or not CanAttack(c) then
+        return
+    end
+    skill4_timer = skill4_timer + dt
+    if skill4_timer < flags.skill4_rate then
+        return
+    end
+    skill4_timer = 0
+    pcall(hit_everyone_with_skill4)
+end)
+
 local WindUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua"))()
 
 local Window = WindUI:CreateWindow({
@@ -427,6 +504,30 @@ MainTab:Slider({
     Value = { Min = 1, Max = 40, Default = math.floor(kill_delay_default) },
     Callback = function(value)
         flags.kill_rate = value * 0.05
+        save_config()
+    end,
+})
+
+MainTab:Toggle({
+    Title = "Kill All (Seth-Only)",
+    Desc = "Once on, continuously spams Seth's Skill4Hit at every alive enemy on the map -- not just on your own cast -- centering the explosion on each enemy so the server's range check is bypassed (verified). GetEnemies already filters out teammates (via SameTeam), so your own team is never hit. Champion-aware: re-resolves your live champion's Skill4Hit each cycle, so it stays dormant on champions without one. Only fires when you can attack (not stunned/dead). Uses CallServer (anti-cheat safe). Best with Infinite Energy + No Cooldown.",
+    Value = flags.skill4_everyone,
+    Callback = function(state)
+        flags.skill4_everyone = state
+        if state then
+            prime_skill4_hit()
+        end
+        save_config()
+    end,
+})
+
+local skill4_delay_default = math.clamp(flags.skill4_rate / 0.05, 1, 40)
+MainTab:Slider({
+    Title = "Kill All (Seth) Delay",
+    Desc = "Seconds between Skill4Hit spam cycles on every enemy (lower = faster).",
+    Value = { Min = 1, Max = 40, Default = math.floor(skill4_delay_default) },
+    Callback = function(value)
+        flags.skill4_rate = value * 0.05
         save_config()
     end,
 })
