@@ -4,10 +4,8 @@ local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local CollectionService = game:GetService("CollectionService")
 local HttpService = game:GetService("HttpService")
-
 local LocalPlayer = Players.LocalPlayer
 local PlayerScripts = LocalPlayer:WaitForChild("PlayerScripts")
-
 local Variables = require(PlayerScripts:WaitForChild("Variables"))
 local Debounce = require(PlayerScripts:WaitForChild("Debounce"))
 local Util = ReplicatedStorage:WaitForChild("Util")
@@ -15,15 +13,11 @@ local GetEnemies = require(Util:WaitForChild("GetEnemies"))
 local IsAlive = require(Util:WaitForChild("IsAlive"))
 local BufferPos = require(Util:WaitForChild("BufferPos"))
 local CanAttack = require(Util:WaitForChild("CanAttack"))
-
 local CallServer = require(PlayerScripts:WaitForChild("Client"):WaitForChild("CallServer"))
-
 local ArashMineRemote = ReplicatedStorage:WaitForChild("RF"):WaitForChild("Champions"):WaitForChild("Arash"):WaitForChild("ArashMine")
-
 if getgenv().ENCOUNTERS_HUB and getgenv().ENCOUNTERS_HUB.cleanup then
     pcall(getgenv().ENCOUNTERS_HUB.cleanup)
 end
-
 local cleanups = {}
 local conns = {}
 local function onCleanup(fn)
@@ -45,29 +39,25 @@ local function cleanup()
     cleanups = {}
 end
 getgenv().ENCOUNTERS_HUB = { cleanup = cleanup }
-
 if STATE and STATE.onCleanup then
     STATE.onCleanup(cleanup)
 end
-
 local CONFIG_FILE = "encounters_hub_config.json"
-
 local flags = {
     inf_energy = false,
     inf_ult = false,
     no_cooldown = false,
     godmode = false,
     mine_target = false,
-
     mine_target_rate = 0.3,
     kill = false,
-
     kill_rate = 0.2,
     skill4_everyone = false,
-
     skill4_rate = 0.2,
+    kill_aura = false,
+    kill_aura_radius = 20,
+    kill_aura_hits = 25,
 }
-
 local function load_config()
     if not isfile(CONFIG_FILE) then
         return {}
@@ -82,7 +72,6 @@ local function load_config()
     end
     return data
 end
-
 local function save_config()
     local snap = {
         inf_energy = flags.inf_energy,
@@ -95,12 +84,14 @@ local function save_config()
         kill_rate = flags.kill_rate,
         skill4_everyone = flags.skill4_everyone,
         skill4_rate = flags.skill4_rate,
+        kill_aura = flags.kill_aura,
+        kill_aura_radius = flags.kill_aura_radius,
+        kill_aura_hits = flags.kill_aura_hits,
     }
     pcall(function()
         writefile(CONFIG_FILE, HttpService:JSONEncode(snap))
     end)
 end
-
 do
     local saved = load_config()
     for k in pairs(flags) do
@@ -109,21 +100,16 @@ do
         end
     end
 end
-
 local original_cdr = Workspace:GetAttribute("cdr")
-
 if flags.no_cooldown then
     pcall(function()
         Workspace:SetAttribute("cdr", 1)
     end)
 end
-
 if flags.godmode then
     Debounce.antikb = true
 end
-
 local GetEnergy = require(PlayerScripts:WaitForChild("Client"):WaitForChild("GetEnergy"))
-
 local function real_energy()
     local char = LocalPlayer.Character
     if char then
@@ -134,7 +120,6 @@ local function real_energy()
     end
     return 0
 end
-
 hookfunction(GetEnergy, function()
     if flags.inf_energy then
         return 100
@@ -146,7 +131,6 @@ onCleanup(function()
         hookfunction(GetEnergy, real_energy)
     end)
 end)
-
 connect(RunService.Heartbeat, function()
     local char = LocalPlayer.Character
     if not char then
@@ -163,7 +147,6 @@ connect(RunService.Heartbeat, function()
         end
     end
     if flags.no_cooldown then
-
         Workspace:SetAttribute("cdr", 1)
     end
     if flags.godmode then
@@ -174,14 +157,11 @@ onCleanup(function()
     pcall(function()
         Workspace:SetAttribute("cdr", original_cdr)
     end)
-
     pcall(function()
         Debounce.antikb = nil
     end)
 end)
-
 local MY_UID = tostring(LocalPlayer.UserId)
-
 local function count_own_mines()
     local n = 0
     for _, j in ipairs(CollectionService:GetTagged("Unit")) do
@@ -191,7 +171,6 @@ local function count_own_mines()
     end
     return n
 end
-
 local function get_target()
     local t = Variables.aimTarget
     if t and IsAlive(t) then
@@ -222,16 +201,13 @@ local function get_target()
     end
     return best or enemies[1]
 end
-
 local function is_grounded(target)
     local hum = target:FindFirstChildOfClass("Humanoid")
     if not hum then
         return false
     end
-
     return hum.FloorMaterial ~= Enum.Material.Air
 end
-
 local function place_mine_at(target)
     if not is_grounded(target) then
         return
@@ -240,7 +216,6 @@ local function place_mine_at(target)
     if not thrp then
         return
     end
-
     local params = RaycastParams.new()
     local filter = {}
     for _, p in ipairs(Players:GetPlayers()) do
@@ -265,7 +240,6 @@ local function place_mine_at(target)
         ArashMineRemote:InvokeServer(BufferPos(pos))
     end)
 end
-
 local mine_timer = 0
 connect(RunService.Heartbeat, function(dt)
     if not flags.mine_target then
@@ -284,7 +258,6 @@ connect(RunService.Heartbeat, function(dt)
         place_mine_at(target)
     end
 end)
-
 local function get_ult_remote()
     local c = LocalPlayer.Character
     if not c then
@@ -304,7 +277,6 @@ local function get_ult_remote()
     end
     return f:FindFirstChild("Ultimate")
 end
-
 local kill_timer = 0
 connect(RunService.Heartbeat, function(dt)
     if not flags.kill then
@@ -330,7 +302,6 @@ connect(RunService.Heartbeat, function(dt)
         end)
     end
 end)
-
 local function get_skill4_hit_remote()
     local c = LocalPlayer.Character
     if not c then
@@ -350,7 +321,6 @@ local function get_skill4_hit_remote()
     end
     return f:FindFirstChild("Skill4Hit")
 end
-
 local function prime_skill4_hit()
     local remote = get_skill4_hit_remote()
     if not remote then
@@ -360,7 +330,6 @@ local function prime_skill4_hit()
         CallServer(remote, CFrame.new(), 0, {})
     end)
 end
-
 local function hit_everyone_with_skill4()
     local c = LocalPlayer.Character
     if not c or not IsAlive(c) then
@@ -385,7 +354,6 @@ local function hit_everyone_with_skill4()
         end
     end
 end
-
 local skill4_timer = 0
 connect(RunService.Heartbeat, function(dt)
     if not flags.skill4_everyone then
@@ -402,20 +370,222 @@ connect(RunService.Heartbeat, function(dt)
     skill4_timer = 0
     pcall(hit_everyone_with_skill4)
 end)
-
+local DamageRequestFn = require(PlayerScripts:WaitForChild("Client"):WaitForChild("DamageRequest"))
+local Mog = ReplicatedStorage:WaitForChild("RE"):WaitForChild("Mog")
+local function make_call_server(suppress)
+    local reported = {}
+    return function(p1, ...)
+        if not p1 then
+            return reported
+        end
+        if suppress then
+            if p1 == Mog then
+                return
+            end
+            if p1:IsA("RemoteEvent") then
+                p1:FireServer(...)
+                return
+            end
+            if p1:IsA("RemoteFunction") then
+                return p1:InvokeServer(...)
+            end
+            return
+        end
+        Variables.sotuff = Variables.sotuff + 1
+        if not Debounce.mogged or typeof(Debounce.mogged) ~= "table" then
+            if p1:IsA("RemoteEvent") then
+                p1:FireServer(...)
+                return
+            end
+            if p1:IsA("RemoteFunction") then
+                return p1:InvokeServer(...)
+            end
+            return
+        end
+        local ts, reason, detail = Debounce.mogged[1], Debounce.mogged[2], Debounce.mogged[3]
+        if table.find(reported, ts) then
+            if p1:IsA("RemoteEvent") then
+                p1:FireServer(...)
+                return
+            end
+            if p1:IsA("RemoteFunction") then
+                return p1:InvokeServer(...)
+            end
+            return
+        end
+        table.insert(reported, ts)
+        if p1:IsA("RemoteEvent") then
+            p1:FireServer(buffer.fromstring("mog"), buffer.fromstring(reason), buffer.fromstring(detail))
+            return
+        end
+        if p1:IsA("RemoteFunction") then
+            return p1:InvokeServer(buffer.fromstring("mog"), buffer.fromstring(reason), buffer.fromstring(detail))
+        end
+    end
+end
+local CheckAttackFn = require(PlayerScripts:WaitForChild("Client"):WaitForChild("CheckAttack"))
+local AddUltimate = require(PlayerScripts:WaitForChild("Client"):WaitForChild("AddUltimate"))
+local GetNested = require(Util:WaitForChild("GetNested"))
+local ClientFolder = PlayerScripts:WaitForChild("Client")
+local function make_check_attack(report_invalid)
+    local report
+    if report_invalid then
+        local src = ClientFolder:FindFirstChild("AuraFarm")
+        if src then
+            local clone = src:Clone()
+            report = require(clone)
+            clone:Destroy()
+        else
+            report = function() end
+        end
+    else
+        report = function() end
+    end
+    return function(p1)
+        local idx = buffer.readu16(p1, 0)
+        local pos = table.find(Variables.storedIds, idx)
+        if pos then
+            table.remove(Variables.storedIds, pos)
+        else
+            report("invalid attack", idx)
+        end
+        local attackName = Variables.attackIds[idx]
+        local ok, gain = pcall(function()
+            return buffer.readi8(p1, 2)
+        end)
+        if ok and gain then
+            if gain < 0 then
+                gain = math.abs(gain) / 10
+            end
+            AddUltimate(gain)
+            if gain > 0 then
+                local char = LocalPlayer.Character
+                if char and attackName then
+                    pcall(function()
+                        local hs = GetNested({ PlayerScripts, "Client", "Champions", char.Name, attackName .. "HitSuccess" })
+                        if hs then
+                            require(hs)()
+                        end
+                    end)
+                end
+            end
+        end
+    end
+end
+local function apply_anticheat()
+    pcall(function()
+        hookfunction(CallServer, make_call_server(true))
+    end)
+    pcall(function()
+        hookfunction(CheckAttackFn, make_check_attack(false))
+    end)
+end
+apply_anticheat()
+onCleanup(function()
+    pcall(function()
+        hookfunction(CallServer, make_call_server(false))
+    end)
+    pcall(function()
+        hookfunction(CheckAttackFn, make_check_attack(true))
+    end)
+end)
+local function get_basic_attack_idx()
+    local ids = Variables.attackIds
+    if not ids or #ids == 0 then
+        return nil
+    end
+    local name = LocalPlayer.Character and LocalPlayer.Character.Name
+    if name then
+        local aliases = { name }
+        if name == "Senthe" then
+            table.insert(aliases, "Seth")
+        elseif name == "Seth" then
+            table.insert(aliases, "Senthe")
+        end
+        for _, alias in ipairs(aliases) do
+            for _, suf in ipairs({ "Basic1", "Basic2", "Basic" }) do
+                for i, n in ipairs(ids) do
+                    if n == alias .. suf then
+                        return i
+                    end
+                end
+            end
+        end
+    end
+    for i, n in ipairs(ids) do
+        if n:match("Basic") then
+            return i
+        end
+    end
+    return nil
+end
+local function kill_aura_burst(target, cframe, idx)
+    for _ = 1, flags.kill_aura_hits do
+        local b = buffer.create(2)
+        buffer.writeu16(b, 0, idx)
+        pcall(DamageRequestFn, { b, Workspace:GetServerTimeNow(), cframe, target }, true)
+    end
+end
+local KILL_AURA_COOLDOWN = 0.4
+local KILL_AURA_MAX_PENDING = 120
+local kill_aura_timer = 0
+connect(RunService.Heartbeat, function(dt)
+    if not flags.kill_aura then
+        return
+    end
+    kill_aura_timer = kill_aura_timer - dt
+    if kill_aura_timer > 0 then
+        return
+    end
+    if #Variables.storedIds > KILL_AURA_MAX_PENDING then
+        table.clear(Variables.storedIds)
+    end
+    local c = LocalPlayer.Character
+    if not c or not IsAlive(c) or not CanAttack(c) then
+        return
+    end
+    local hrp = c:FindFirstChild("HumanoidRootPart")
+    if not hrp then
+        return
+    end
+    local idx = get_basic_attack_idx()
+    if not idx then
+        return
+    end
+    local enemies = GetEnemies(c, true)
+    if not enemies then
+        return
+    end
+    local r2 = flags.kill_aura_radius * flags.kill_aura_radius
+    local origin = hrp.Position
+    local cframe = hrp.CFrame
+    local hits = 0
+    for _, e in ipairs(enemies) do
+        if e ~= c and IsAlive(e) then
+            local ehrp = e:FindFirstChild("HumanoidRootPart")
+            if ehrp then
+                local o = ehrp.Position - origin
+                if o.X * o.X + o.Y * o.Y + o.Z * o.Z <= r2 then
+                    kill_aura_burst(e, cframe, idx)
+                    hits = hits + 1
+                end
+            end
+        end
+    end
+    if hits > 0 then
+        kill_aura_timer = KILL_AURA_COOLDOWN
+    end
+end)
 local WindUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua"))()
-
 local Window = WindUI:CreateWindow({
     Title = "Encounters Hub",
     Folder = "encounters_hub",
     Icon = "solar:bolt-bold",
 })
-
 local MainTab = Window:Tab({
     Title = "Main",
     Icon = "solar:bolt-bold",
 })
-
 MainTab:Toggle({
     Title = "Infinite Energy",
     Desc = "Keep energy maxed for abilities, dash, jump, shield.",
@@ -425,7 +595,6 @@ MainTab:Toggle({
         save_config()
     end,
 })
-
 MainTab:Toggle({
     Title = "Infinite Ult",
     Desc = "Keep ultimate meter full so ult is always ready.",
@@ -435,7 +604,6 @@ MainTab:Toggle({
         save_config()
     end,
 })
-
 MainTab:Toggle({
     Title = "No Cooldown",
     Desc = "Zero every ability cooldown via the game's cdr stat. Reversible.",
@@ -450,7 +618,6 @@ MainTab:Toggle({
         save_config()
     end,
 })
-
 MainTab:Toggle({
     Title = "Godmode",
     Desc = "Never get launched by attacks (anti-knockback). The damage percent still ticks up on the server -- that's unavoidable and cosmetic -- but with knockback blocked you can't be sent off the blast zone, so attacks can't kill you. Uses the game's own Debounce.antikb flag.",
@@ -465,7 +632,6 @@ MainTab:Toggle({
         save_config()
     end,
 })
-
 MainTab:Toggle({
     Title = "Mine Target",
     Desc = "Scatter mines ahead of your locked-on / nearest enemy so they keep walking into blasts. Arash only. Use with Infinite Energy. (Mines can't be force-detonated -- the server blows them up on proximity, so this leads the target to maximize hits.)",
@@ -475,7 +641,6 @@ MainTab:Toggle({
         save_config()
     end,
 })
-
 local mine_delay_default = math.clamp(flags.mine_target_rate / 0.05, 1, 40)
 MainTab:Slider({
     Title = "Mine Target Delay",
@@ -486,7 +651,6 @@ MainTab:Slider({
         save_config()
     end,
 })
-
 MainTab:Toggle({
     Title = "Kill (Ult Spam)",
     Desc = "Spam your champion's ultimate at the locked-on / nearest enemy so the ult keeps hitting them. Champion-specific (uses your live champion's ult remote, re-resolved each cast). Most ults are self-centered AoE (e.g. Kusanagi's slash), so stay near the target. Use with Infinite Ult + No Cooldown.",
@@ -496,7 +660,6 @@ MainTab:Toggle({
         save_config()
     end,
 })
-
 local kill_delay_default = math.clamp(flags.kill_rate / 0.05, 1, 40)
 MainTab:Slider({
     Title = "Kill Delay",
@@ -507,10 +670,9 @@ MainTab:Slider({
         save_config()
     end,
 })
-
 MainTab:Toggle({
     Title = "Kill All (Seth-Only)",
-    Desc = "Once on, continuously spams Seth's Skill4Hit at every alive enemy on the map -- not just on your own cast -- centering the explosion on each enemy so the server's range check is bypassed (verified). GetEnemies already filters out teammates (via SameTeam), so your own team is never hit. Champion-aware: re-resolves your live champion's Skill4Hit each cycle, so it stays dormant on champions without one. Only fires when you can attack (not stunned/dead). Uses CallServer (anti-cheat safe). Best with Infinite Energy + No Cooldown.",
+    Desc = "Once on, continuously spams Seth's Skill4Hit at every alive enemy on the map -- not just on your own cast -- centering the explosion on each enemy so the server's range check is bypassed (verified). GetEnemies already filters out teammates (via SameTeam), so your own team is never hit. Champion-aware: re-resolves your live champion's Skill4Hit each cycle, so it stays dormant on champions without one. Only fires when you can attack (not stunned/dead). Uses CallServer (anti-cheat safe: the bypass is always on). Best with Infinite Energy + No Cooldown.",
     Value = flags.skill4_everyone,
     Callback = function(state)
         flags.skill4_everyone = state
@@ -520,7 +682,6 @@ MainTab:Toggle({
         save_config()
     end,
 })
-
 local skill4_delay_default = math.clamp(flags.skill4_rate / 0.05, 1, 40)
 MainTab:Slider({
     Title = "Kill All (Seth) Delay",
@@ -531,12 +692,39 @@ MainTab:Slider({
         save_config()
     end,
 })
-
+MainTab:Toggle({
+    Title = "Kill Aura",
+    Desc = "When on, every enemy within the aura radius is hit with a stacked burst of basic-attack damage (~10% each) -- 25 hits ~= 250%, which launches them off the blast zone for an instant KO. Anything inside the radius dies. Works on EVERY champion (uses your live champion's own basic, re-resolved each tick; the server honors any basic id), not just Senthe. Uses the game's own DamageRequest path through CallServer, and with the anticheat bypass (always on) the mog-kick handshake is suppressed at CallServer AND the 'invalid attack' AuraFarm call in CheckAttack is skipped, so the aura can fire freely with zero kick risk. storedIds is cleared (never stalled) if the server falls behind on acks, so it no longer stops working after a while. Never hits teammates (GetEnemies filters them). Only fires when you can attack (not stunned/dead). Best with No Cooldown.",
+    Value = flags.kill_aura,
+    Callback = function(state)
+        flags.kill_aura = state
+        save_config()
+    end,
+})
+local kill_aura_radius_default = math.clamp(flags.kill_aura_radius, 5, 60)
+MainTab:Slider({
+    Title = "Kill Aura Radius",
+    Desc = "Studs around you the aura reaches. The server accepts hits from any distance, so this is just how close an enemy must be -- crank it to hit across the map.",
+    Value = { Min = 5, Max = 60, Default = math.floor(kill_aura_radius_default) },
+    Callback = function(value)
+        flags.kill_aura_radius = value
+        save_config()
+    end,
+})
+local kill_aura_hits_default = math.clamp(flags.kill_aura_hits, 5, 50)
+MainTab:Slider({
+    Title = "Kill Aura Hits",
+    Desc = "Basic-attack hits stacked per enemy per tick (each ~10% dmg). 25 ~= 250% (usually a KO); raise it for guaranteed launches.",
+    Value = { Min = 5, Max = 50, Default = math.floor(kill_aura_hits_default) },
+    Callback = function(value)
+        flags.kill_aura_hits = value
+        save_config()
+    end,
+})
 local SELF_URL = "https://raw.githubusercontent.com/R31HT/vigilant-invention/refs/heads/main/gui"
 if queue_on_teleport then
     pcall(queue_on_teleport, ('loadstring(game:HttpGet(%q))()'):format(SELF_URL))
 end
-
 onCleanup(function()
     pcall(function()
         Window:Destroy()
